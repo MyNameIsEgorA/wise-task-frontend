@@ -17,7 +17,6 @@ const isControlsVisible = ref(false);
 
 const deleteNode = () => {
   console.log(`Удалили узел с id: ${props.id}`);
-  removeNodes(props.id);
 };
 
 const startEditing = () => {
@@ -25,9 +24,17 @@ const startEditing = () => {
   newTitle.value = props.data.label || "";
 };
 
-const finishEditing = () => {
+const finishEditing = (e: Event) => {
+  e.stopPropagation();
   if (newTitle.value.trim()) {
-    nodeStore.renameNode(props.id, newTitle.value);
+    const data = nodeStore.getNodeData(props.id);
+    if (!data) {
+      return;
+    }
+    nodeStore.updateNodeData(props.id, {
+      ...data,
+      label: newTitle.value,
+    });
   }
   isEditing.value = false;
 };
@@ -87,8 +94,8 @@ onUnmounted(() => {
     :id="props.id"
     class="vue-flow__node-default"
     :style="{
-      width: `${data.size || 100}px`,
-      height: `${data.size || 100}px`,
+      width: `${data.size?.width || 100}px`,
+      height: `${data.size?.height || 100}px`,
       border: `2px solid ${'#333'}`,
       borderRadius: '50%',
       display: 'flex',
@@ -109,7 +116,6 @@ onUnmounted(() => {
       v-else
       v-model="newTitle"
       @blur="finishEditing"
-      @keyup.enter="finishEditing"
       :style="{
         background: 'transparent',
         fontSize: '16px',
@@ -126,7 +132,7 @@ onUnmounted(() => {
     <NodeControls
       v-if="isControlsVisible"
       :nodeId="props.id"
-      :size="data.size || 100"
+      :size="data.size || { width: 100, height: 100 }"
       :label="data.label"
       :weight="data.weight || 0"
       :color="data.color || '#333'"

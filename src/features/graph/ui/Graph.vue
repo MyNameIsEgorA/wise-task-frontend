@@ -6,6 +6,8 @@ import SpecialEdge from "./SpecialEdge.vue";
 import { useNodeStore } from "@/features/graph/stores/nodes";
 import { ref } from "vue";
 import HelpingModal from "@/features/graph/ui/HelpingModal.vue";
+import { createEdgeFromConnection } from "@/features/graph/lib/helpers/createEdgeFromConnection";
+import { CustomEdge } from "@/features/graph/types/CustomEdge";
 
 interface Props {
   style?: Record<string, string | number>;
@@ -18,8 +20,8 @@ const nodeStore = useNodeStore();
 const {
   onConnect,
   addEdges,
-  onNodeDragStop,
   onConnectEnd,
+  onNodeDragStart,
   onPaneContextMenu,
   project,
 } = useVueFlow();
@@ -46,16 +48,18 @@ const closeHelpModal = () => {
 };
 
 onConnect((connection) => {
-  connection.type = "special";
-  addEdges(connection);
+  const edge: CustomEdge = createEdgeFromConnection(connection);
+  nodeStore.addEdge(edge);
 });
 
-onNodeDragStop(() => {
-  nodeStore.saveState();
+onNodeDragStart((event) => {
+  nodeStore.nodeShift(event.node.id, event.node.computedPosition);
+  console.log("NODE:", event.node);
+  console.log("EVENT:", event.event);
 });
 
 onConnectEnd(() => {
-  nodeStore.saveState();
+  // nodeStore.saveState();
 });
 
 const downloadJson = () => {
@@ -130,7 +134,7 @@ const addNodeToCenter = () => {
     <VueFlow
       :connection-radius="30"
       v-model:nodes="nodeStore.nodes"
-      v-model:edges="nodeStore.edges"
+      v-model:edges="nodeStore.edges as any"
       class="pinia-flow"
     >
       <template #node-special="specialNodeProps">

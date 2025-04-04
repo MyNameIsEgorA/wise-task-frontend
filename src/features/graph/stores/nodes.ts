@@ -1,54 +1,25 @@
 import { defineStore } from "pinia";
-import type { CustomNode } from "@/features/graph/types/CustomNode";
-import type { Edge } from "@vue-flow/core";
-import { cloneDeep } from "@apollo/client/utilities";
-import { CustomEdge } from "@/features/graph/types/Edge";
-
-export interface NodesStoreState {
-  nodes: CustomNode[];
-  edges: CustomEdge[];
-  history: { nodes: CustomNode[]; edges: CustomEdge[] }[];
-  historyIndex: number;
-  isDirected: boolean;
-  name: string;
-  id?: string;
-}
+import { NodesStoreState } from "../types/NodesStore";
+import { Edge } from "@vue-flow/core";
+import { history } from "../lib/history/history";
+import { CustomNode } from "@/features/graph/types/CustomNode";
+import { CustomEdge } from "@/features/graph/types/CustomEdge";
 
 export const useNodeStore = defineStore("nodes", {
   state: (): NodesStoreState => ({
     nodes: [],
     edges: [],
-    history: [],
     historyIndex: -1,
     isDirected: true,
     id: undefined,
     name: "",
   }),
-  actions: {
-    saveState(): void {
-      if (this.history.length >= 10) {
-        this.history.shift();
-        this.historyIndex--;
-      }
 
-      this.history = this.history.slice(0, this.historyIndex + 1);
-      this.history.push({
-        nodes: cloneDeep(this.nodes),
-        edges: cloneDeep(this.edges),
-      });
-      this.historyIndex = this.history.length - 1;
-    },
-    undo(): void {
-      if (this.historyIndex > 0) {
-        this.historyIndex--;
-        const state = this.history[this.historyIndex];
-        this.nodes = cloneDeep(state.nodes);
-        this.edges = cloneDeep(state.edges);
-      }
-    },
+  actions: {
     toggleIsDirected(): void {
       this.isDirected = !this.isDirected;
     },
+
     addNode(params?: { x: number; y: number }): void {
       const id: string = Date.now().toString();
       const maxNum = this.getMaximumLabel();
@@ -62,24 +33,111 @@ export const useNodeStore = defineStore("nodes", {
         type: "special",
         data: { label },
       });
-      this.saveState();
+      history.onStateUpdate({ type: "node:add", properties: { nodeId: id } });
     },
-    renameNode(id: string, name: string): void {
-      const node = this.nodes.find((node) => node.id === id);
-      if (node) {
-        node.data.label = name;
-        this.saveState();
+
+    undo() {
+      this.$state = history.undo(this.$state);
+    },
+
+    removeNode(id: string) {
+      const removedNode: CustomNode | undefined = this.nodes.find(
+        (node) => node.id === id,
+      );
+      if (!removedNode) {
+        return;
       }
+      this.nodes = this.nodes.filter((node) => node.id !== removedNode.id);
+      const edges: CustomEdge[] = this.edges.filter(
+        (edge: CustomEdge) =>
+          edge.sourceNode.id === removedNode.id ||
+          edge.targetNode.id === removedNode.id,
+      );
+      history.onStateUpdate({
+        type: "node:remove",
+        properties: { node: removedNode, edges: edges },
+      });
     },
+
+    getNodeData(nodeId: string): undefined | CustomNode["data"] {
+      const nodeIndex: number = this.nodes.findIndex(
+        (node: CustomNode) => node.id === nodeId,
+      );
+      if (nodeIndex === -1) {
+        return;
+      }
+      return this.nodes[nodeIndex].data;
+    },
+
+    updateNodeData(nodeId: string, data: CustomNode["data"]) {
+      const nodeIndex: number = this.nodes.findIndex(
+        (node: CustomNode) => node.id === nodeId,
+      );
+      if (nodeIndex === -1) {
+        return;
+      }
+      const prevData = this.nodes[nodeIndex].data;
+      this.nodes[nodeIndex].data = data;
+      history.onStateUpdate({
+        type: "node:change_data",
+        properties: { nodeId: nodeId, data: prevData },
+      });
+    },
+
+    nodeShift(nodeId: string, coords: { x: number; y: number }) {
+      const nodeIndex = this.nodes.findIndex((node) => node.id === nodeId);
+      if (nodeIndex === -1) {
+        return;
+      }
+      history.onStateUpdate({
+        type: "node:change_shift",
+        properties: { nodeId: nodeId, coords: coords },
+      });
+    },
+
+    changeNodeSize(isIncreasing: boolean, nodeId: string) {
+      const nodeIndex = this.nodes.findIndex((node) => node.id === nodeId);
+      if (nodeIndex === -1) {
+        return;
+      }
+      const size = this.nodes[nodeIndex].data.size?.width || 100;
+      const newSize = isIncreasing ? size + 10 : size - 10;
+      this.nodes[nodeIndex].data.size = { width: newSize, height: newSize };
+      history.onStateUpdate({
+        type: "node:change_size",
+        properties: { nodeId: nodeId, prevSize: size },
+      });
+    },
+
     removeEdge(id: string): void {
+      const edgeIndex = this.edges.findIndex((edge) => edge.id === id);
+      if (edgeIndex === -1) {
+        return;
+      }
+      history.onStateUpdate({
+        type: "edge:remove",
+        properties: this.edges[edgeIndex],
+      });
       this.edges = this.edges.filter((edge) => edge.id !== id);
     },
+
     updateEdge(id: string, updates: Partial<Edge>): void {
       const edge = this.edges.find((edge) => edge.id === id);
       if (edge) {
         Object.assign(edge, updates);
       }
     },
+
+    addEdge(edge: CustomEdge) {
+      this.edges.push(edge);
+      history.onStateUpdate({
+        type: "edge:add",
+        properties: {
+          edgeId: edge.id,
+        },
+      });
+    },
+
     getMaximumLabel(): number {
       let maxNumber = -1;
       for (const node of this.nodes) {
