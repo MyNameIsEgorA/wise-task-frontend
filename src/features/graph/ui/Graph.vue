@@ -4,8 +4,12 @@ import { VueFlow } from "@vue-flow/core";
 import SpecialNode from "./SpecialNode.vue";
 import SpecialEdge from "./SpecialEdge.vue";
 import { useNodeStore } from "@/features/graph/stores/nodes";
-import { ref } from "vue";
+import { ref, nextTick, watch, computed } from "vue";
 import HelpingModal from "@/features/graph/ui/HelpingModal.vue";
+import { createEdgeFromConnection } from "@/features/graph/lib/helpers/createEdgeFromConnection";
+import { CustomEdge } from "@/features/graph/types/CustomEdge";
+import { Background } from "@vue-flow/background";
+import RightClickModal from "@/features/graph/ui/RightClickModal.vue";
 
 interface Props {
   style?: Record<string, string | number>;
@@ -15,16 +19,41 @@ const props = defineProps<Props>();
 
 const nodeStore = useNodeStore();
 
-const {
-  onConnect,
-  addEdges,
-  onNodeDragStop,
-  onConnectEnd,
-  onPaneContextMenu,
-  project,
-} = useVueFlow();
+const { onConnect, onNodeDragStart, onPaneContextMenu, project } = useVueFlow();
 
-onPaneContextMenu((event) => {
+const selectedNodes = computed(() =>
+  nodeStore.nodes.filter((node) => node.selected),
+);
+
+const contextMenuPosition = ref({ x: 0, y: 0 });
+const isHelpModalOpen = ref(false);
+const isRightClickModalOpen = ref(false);
+const contextMenuRef = ref<HTMLElement | null>(null);
+
+watch(selectedNodes, (newSelected) => {
+  console.log(
+    "Выделенные ноды:",
+    newSelected.map((n) => n.id),
+  );
+});
+
+onPaneContextMenu(async (event) => {
+  event.preventDefault();
+  isRightClickModalOpen.value = false;
+
+  await nextTick();
+
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const x = event.clientX - bounds.left;
+  const y = event.clientY - bounds.top;
+
+  const pos = project({ x, y });
+  contextMenuPosition.value = { x: pos.x + 29, y: pos.y + 10 };
+
+  isRightClickModalOpen.value = true;
+});
+
+onPaneContextMenu(async (event) => {
   event.preventDefault();
 
   const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -32,10 +61,16 @@ onPaneContextMenu((event) => {
   const y = event.clientY - bounds.top;
 
   const pos = project({ x, y });
-  nodeStore.addNode({ x: pos.x - 40, y: pos.y - 40 });
+  contextMenuPosition.value = { x: pos.x + 10, y: pos.y };
+  isRightClickModalOpen.value = true;
 });
 
-const isHelpModalOpen = ref(false);
+const handleAddNodeAtPosition = () => {
+  nodeStore.addNode({
+    x: contextMenuPosition.value.x,
+    y: contextMenuPosition.value.y,
+  });
+};
 
 const openHelpModal = () => {
   isHelpModalOpen.value = true;
@@ -45,17 +80,17 @@ const closeHelpModal = () => {
   isHelpModalOpen.value = false;
 };
 
+const closeRightClickModal = () => {
+  isRightClickModalOpen.value = false;
+};
+
 onConnect((connection) => {
-  connection.type = "special";
-  addEdges(connection);
+  const edge: CustomEdge = createEdgeFromConnection(connection);
+  nodeStore.addEdge(edge);
 });
 
-onNodeDragStop(() => {
-  nodeStore.saveState();
-});
-
-onConnectEnd(() => {
-  nodeStore.saveState();
+onNodeDragStart((event) => {
+  nodeStore.nodeShift(event.node.id, event.node.computedPosition);
 });
 
 const downloadJson = () => {
@@ -115,6 +150,7 @@ const addNodeToCenter = () => {
       <v-btn @click="nodeStore.undo">UNDO</v-btn>
       <v-btn @click="downloadJson">Скачать JSON</v-btn>
       <v-btn @click="nodeStore.toggleIsDirected">Сменить направленность</v-btn>
+      <v-btn @click="nodeStore.normalizeView">Нормализовать граф</v-btn>
       <v-btn>
         <label for="upload-json" style="cursor: pointer">Загрузить JSON</label>
         <input
@@ -132,7 +168,15 @@ const addNodeToCenter = () => {
       v-model:nodes="nodeStore.nodes"
       v-model:edges="nodeStore.edges"
       class="pinia-flow"
+      @pane-click="closeRightClickModal"
     >
+      <RightClickModal
+        v-if="isRightClickModalOpen"
+        :position="contextMenuPosition"
+        @close="isRightClickModalOpen = false"
+        @add-node="handleAddNodeAtPosition"
+      />
+      <Background />
       <template #node-special="specialNodeProps">
         <SpecialNode v-bind="specialNodeProps" />
       </template>
